@@ -9,7 +9,7 @@ export interface ThemeOptions {
   defaultTheme?: string;
   /** shadow 忽略清單(檔名或路徑片段)。預設 [".DS_Store", "public/"] */
   ignore?: string[];
-  /** 是否啟用 tailwind 主題 preset 同步。預設 false */
+  /** Tailwind v3 主題 preset 同步(v4 CSS-first 不需要,主題 CSS 直接走 shadow)。預設 false */
   tailwind?: boolean | { presetPath?: string };
   /** 額外注入的 resolve.alias(專案私有 alias 放這裡,套件只內建 @theme 系列) */
   aliases?: Record<string, string>;

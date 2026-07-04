@@ -171,7 +171,7 @@ export default defineThemeConfig(
     envKey: "VITE_THEME",            // 讀取當前主題的環境變數名
     defaultTheme: "default",         // 環境變數未設定時的預設主題
     ignore: [".DS_Store", "public/"], // 不進 shadow 的檔名/路徑片段
-    tailwind: false,                 // 主題 tailwind preset 同步(見下方)
+    tailwind: false,                 // Tailwind v3 preset 同步(v4 不需要,見下方)
     aliases: {                       // 專案私有 alias(可選)
       "@stores": "./src/stores",
     },
@@ -214,7 +214,30 @@ index.html 用法:
 
 `themes/<theme>/public` 會自動設為 Vite 的 `publicDir`。public 不進 shadow、也不參與繼承——每個主題的 public 需自行維護完整內容。
 
-### tailwind preset 同步
+### Tailwind 主題化
+
+#### v4(CSS-first)— 不需要任何選項
+
+v4 的主題設定就是 CSS 檔,shadow 目錄與繼承機制直接涵蓋,零設定。每個主題放一份 token 檔:
+
+```css
+/* themes/base/tailwind.css */
+@theme {
+  --color-brand: #2563eb;
+}
+```
+
+根 CSS 以相對路徑 import runtime 目錄那份(`@import` 由 Tailwind 解析,請用相對路徑而非 alias):
+
+```css
+/* src/style.css */
+@import "tailwindcss";
+@import "../.runtime/theme/tailwind.css";
+```
+
+客戶主題要換色就放一份自己的 `tailwind.css` 覆蓋;沒放就自動沿用 `extends` 主題的。編輯 token 一樣走 HMR 即時生效。注意:基底主題必須有這個檔案(import 目標要存在)。
+
+#### v3(JS config)— `tailwind` 選項
 
 主題各自帶 `tailwind.config.ts` 時開啟:
 
