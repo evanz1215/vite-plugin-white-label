@@ -102,9 +102,9 @@ describe("cli actions", () => {
     const config = readBrandConfig(ctx.brandsDir, "client-full");
     expect(config.extends).toBeUndefined();
     expect(config.title).toBe("client-full");
-    expect(
-      existsSync(path.join(ctx.brandsDir, "client-full", "public")),
-    ).toBe(false);
+    expect(existsSync(path.join(ctx.brandsDir, "client-full", "public"))).toBe(
+      false,
+    );
 
     await fs.rm(root, { recursive: true, force: true });
   });
@@ -242,10 +242,7 @@ describe("cli run", () => {
     const config = readBrandConfig(ctx.brandsDir, "client-c");
     expect(config.extends).toBeUndefined(); // isolate 不繼承
     expect(
-      readFileSync(
-        path.join(ctx.brandsDir, "client-c/views/Home.vue"),
-        "utf8",
-      ),
+      readFileSync(path.join(ctx.brandsDir, "client-c/views/Home.vue"), "utf8"),
     ).toBe("base-home"); // extends 一層補檔
 
     await fs.rm(root, { recursive: true, force: true });

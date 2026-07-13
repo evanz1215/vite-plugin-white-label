@@ -18,9 +18,7 @@ describe("defineBrandConfig", () => {
 
     expect(config.base).toBe("/development/");
     expect(config.define?.DEV).toBe(true);
-    expect(
-      (config.plugins as Plugin[]).map((p) => p.name),
-    ).toEqual([
+    expect((config.plugins as Plugin[]).map((p) => p.name)).toEqual([
       "user-plugin",
       "vite-plugin-white-label:alias",
       "vite-plugin-white-label:shadow",

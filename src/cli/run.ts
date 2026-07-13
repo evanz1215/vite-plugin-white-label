@@ -131,100 +131,100 @@ export const run = async (argv: string[], io: RunIO = {}) => {
 
   try {
     switch (command) {
-    case "switch": {
-      const brands = await requireBrands();
-      const current = existsSync(ctx.envFile)
-        ? parseEnv(readFileSync(ctx.envFile, "utf8"))[ctx.envKey]
-        : undefined;
+      case "switch": {
+        const brands = await requireBrands();
+        const current = existsSync(ctx.envFile)
+          ? parseEnv(readFileSync(ctx.envFile, "utf8"))[ctx.envKey]
+          : undefined;
 
-      const brand =
-        args[0] ??
-        (await pick(
-          "請選擇要切換的品牌",
-          brands.map((t) => ({
-            name: t.name,
-            hint: t.name === current ? "(當前品牌)" : "",
-            disabled: t.name === current,
-          })),
-        ));
+        const brand =
+          args[0] ??
+          (await pick(
+            "請選擇要切換的品牌",
+            brands.map((t) => ({
+              name: t.name,
+              hint: t.name === current ? "(當前品牌)" : "",
+              disabled: t.name === current,
+            })),
+          ));
 
-      if (!brands.some((t) => t.name === brand)) {
-        throw new Error(`品牌不存在:${brand}`);
-      }
-      switchBrand(ctx, brand);
-      output.write(`\n${green("✔")} 已切換品牌:${brand}\n`);
-      break;
-    }
-
-    case "create": {
-      const name =
-        args[0] ??
-        (await ask(
-          "請輸入品牌名稱",
-          (input) =>
-            /^[a-z0-9][a-z0-9-]{2,}$/.test(input) ||
-            "至少 3 個字元,僅限小寫英數與 -",
-        ));
-
-      const brands = await requireBrands();
-      const from =
-        values.from ??
-        (await pick(
-          "請選擇來源品牌",
-          brands.map((t) => ({
-            name: t.name,
-            hint: t.config.extends ? `(繼承自 ${t.config.extends})` : "",
-          })),
-        ));
-
-      await createBrand(ctx, name, from, values.isolate);
-      output.write(`\n${green("✔")} 品牌 ${name} 已建立(來源:${from})\n`);
-      if (existsSync(path.join(ctx.brandsDir, from, "public"))) {
-        output.write(
-          `${yellow("!")} 來源品牌有 public 目錄,public 不會被複製/繼承,請自行處理\n`,
-        );
-      }
-      break;
-    }
-
-    case "isolate": {
-      const brands = await requireBrands();
-      const candidates = brands.filter((t) => t.config.extends);
-      if (args[0] === undefined && candidates.length === 0) {
-        throw new Error("沒有可獨立的品牌(皆無 extends 設定)");
+        if (!brands.some((t) => t.name === brand)) {
+          throw new Error(`品牌不存在:${brand}`);
+        }
+        switchBrand(ctx, brand);
+        output.write(`\n${green("✔")} 已切換品牌:${brand}\n`);
+        break;
       }
 
-      const brand =
-        args[0] ??
-        (await pick(
-          "請選擇要獨立的品牌",
-          candidates.map((t) => ({
-            name: t.name,
-            hint: `(繼承自 ${t.config.extends})`,
-          })),
-        ));
+      case "create": {
+        const name =
+          args[0] ??
+          (await ask(
+            "請輸入品牌名稱",
+            (input) =>
+              /^[a-z0-9][a-z0-9-]{2,}$/.test(input) ||
+              "至少 3 個字元,僅限小寫英數與 -",
+          ));
 
-      await isolateBrand(ctx, brand);
-      output.write(`\n${green("✔")} 品牌 ${brand} 已獨立\n`);
-      break;
-    }
+        const brands = await requireBrands();
+        const from =
+          values.from ??
+          (await pick(
+            "請選擇來源品牌",
+            brands.map((t) => ({
+              name: t.name,
+              hint: t.config.extends ? `(繼承自 ${t.config.extends})` : "",
+            })),
+          ));
 
-    case "build": {
-      const brands = args.flatMap((t) => t.split(","));
-      if (brands.length === 0) {
-        throw new Error("build 需要至少一個品牌");
+        await createBrand(ctx, name, from, values.isolate);
+        output.write(`\n${green("✔")} 品牌 ${name} 已建立(來源:${from})\n`);
+        if (existsSync(path.join(ctx.brandsDir, from, "public"))) {
+          output.write(
+            `${yellow("!")} 來源品牌有 public 目錄,public 不會被複製/繼承,請自行處理\n`,
+          );
+        }
+        break;
       }
-      await buildBrands({
-        brandsDir: ctx.brandsDir,
-        brands,
-        outDir: values["out-dir"],
-        configFile: values.config,
-      });
-      break;
-    }
 
-    default:
-      throw new Error(`未知指令:${command}\n\n${HELP}`);
+      case "isolate": {
+        const brands = await requireBrands();
+        const candidates = brands.filter((t) => t.config.extends);
+        if (args[0] === undefined && candidates.length === 0) {
+          throw new Error("沒有可獨立的品牌(皆無 extends 設定)");
+        }
+
+        const brand =
+          args[0] ??
+          (await pick(
+            "請選擇要獨立的品牌",
+            candidates.map((t) => ({
+              name: t.name,
+              hint: `(繼承自 ${t.config.extends})`,
+            })),
+          ));
+
+        await isolateBrand(ctx, brand);
+        output.write(`\n${green("✔")} 品牌 ${brand} 已獨立\n`);
+        break;
+      }
+
+      case "build": {
+        const brands = args.flatMap((t) => t.split(","));
+        if (brands.length === 0) {
+          throw new Error("build 需要至少一個品牌");
+        }
+        await buildBrands({
+          brandsDir: ctx.brandsDir,
+          brands,
+          outDir: values["out-dir"],
+          configFile: values.config,
+        });
+        break;
+      }
+
+      default:
+        throw new Error(`未知指令:${command}\n\n${HELP}`);
     }
   } finally {
     rl?.close();

@@ -155,26 +155,27 @@ $env:VITE_BRAND = "client-a"; pnpm vite build  # Windows PowerShell
 
 ### Common options
 
-| Option | Default | Description |
-| --- | --- | --- |
-| `--dir` | `./brands` | brands directory |
-| `--env-file` | `.env.development` | brand env file |
-| `--env-key` | `VITE_BRAND` | env variable name holding the brand |
-| `--out-dir`, `-o` | `dist` | output root for `build` |
-| `--config`, `-c` | auto-detected | vite config path used by `build` |
+| Option            | Default            | Description                         |
+| ----------------- | ------------------ | ----------------------------------- |
+| `--dir`           | `./brands`         | brands directory                    |
+| `--env-file`      | `.env.development` | brand env file                      |
+| `--env-key`       | `VITE_BRAND`       | env variable name holding the brand |
+| `--out-dir`, `-o` | `dist`             | output root for `build`             |
+| `--config`, `-c`  | auto-detected      | vite config path used by `build`    |
 
 ## Options (`defineBrandConfig` first argument)
 
 ```ts
 export default defineBrandConfig(
   {
-    brandsDir: "./brands",           // brands directory
-    runtimeDir: "./.runtime/brand",  // shadow composition directory (add to .gitignore)
-    envKey: "VITE_BRAND",            // env variable name that holds the active brand
-    defaultBrand: "default",         // fallback brand when the env variable isn't set
+    brandsDir: "./brands", // brands directory
+    runtimeDir: "./.runtime/brand", // shadow composition directory (add to .gitignore)
+    envKey: "VITE_BRAND", // env variable name that holds the active brand
+    defaultBrand: "default", // fallback brand when the env variable isn't set
     ignore: [".DS_Store", "public/"], // filenames/path fragments excluded from the shadow
-    tailwind: false,                 // Tailwind v3 preset sync (not needed for v4, see below)
-    aliases: {                       // project-specific aliases (optional)
+    tailwind: false, // Tailwind v3 preset sync (not needed for v4, see below)
+    aliases: {
+      // project-specific aliases (optional)
       "@stores": "./src/stores",
     },
   },
@@ -188,12 +189,12 @@ All fields are optional; the above shows the defaults.
 
 ### Built-in aliases
 
-| Alias | Points to |
-| --- | --- |
-| `@brand` | `<runtimeDir>` |
-| `@brand-components` | `<runtimeDir>/components` |
-| `@brand-router` | `<runtimeDir>/extra-router` |
-| `@brand-assets` | `<runtimeDir>/assets` |
+| Alias               | Points to                   |
+| ------------------- | --------------------------- |
+| `@brand`            | `<runtimeDir>`              |
+| `@brand-components` | `<runtimeDir>/components`   |
+| `@brand-router`     | `<runtimeDir>/extra-router` |
+| `@brand-assets`     | `<runtimeDir>/assets`       |
 
 ### config.jsonc
 
@@ -201,8 +202,8 @@ Each brand directory has a `config.jsonc` (or `config.json`, comments supported)
 
 ```jsonc
 {
-  "title": "Client A",   // replaces the =VITE_TITLE= placeholder in index.html
-  "extends": "base"      // name of the inherited brand (optional)
+  "title": "Client A", // replaces the =VITE_TITLE= placeholder in index.html
+  "extends": "base", // name of the inherited brand (optional)
 }
 ```
 
@@ -246,7 +247,7 @@ A client brand that wants different colors just ships its own `tailwind.css` to 
 Enable this when each brand ships its own `tailwind.config.ts`:
 
 ```ts
-defineBrandConfig({ tailwind: true }, /* ... */);
+defineBrandConfig({ tailwind: true } /* ... */);
 // or customize the output path: { tailwind: { presetPath: "./.brand-env/tailwind.preset.ts" } }
 ```
 
@@ -275,13 +276,13 @@ On startup, the files under `brands/<brand>` are **hard-linked** into `<runtimeD
 
 In dev mode, Vite's `server.watcher` maintains the links and drives HMR: the module graph holds runtime paths, so once a link update for a file under `brands/` is finished, the plugin maps it to the corresponding runtime module and triggers a reload (framework-agnostic — works uniformly for `.vue`/`.tsx`/CSS). Editors that save via atomic writes (write to a temp file, then rename — e.g. JetBrains' safe write) swap out the inode, breaking the hard link; the plugin detects the inode change and relinks automatically.
 
-| Event | Behavior |
-| --- | --- |
-| File added in a brand | Linked into runtime (overrides any file linked from `extends`) |
-| File removed from a brand | Runtime file removed; if `extends` has a file of the same name, falls back to linking that |
-| File added in `extends` | Linked in only if the brand has no file of the same name |
-| File removed from `extends` | Unlinked only if the brand has no file of the same name |
-| File content changed | Same inode takes effect naturally; an inode swap from an atomic write triggers automatic relinking |
+| Event                       | Behavior                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| File added in a brand       | Linked into runtime (overrides any file linked from `extends`)                                     |
+| File removed from a brand   | Runtime file removed; if `extends` has a file of the same name, falls back to linking that         |
+| File added in `extends`     | Linked in only if the brand has no file of the same name                                           |
+| File removed from `extends` | Unlinked only if the brand has no file of the same name                                            |
+| File content changed        | Same inode takes effect naturally; an inode swap from an atomic write triggers automatic relinking |
 
 ## Limitations
 

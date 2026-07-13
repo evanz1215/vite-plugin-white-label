@@ -67,10 +67,7 @@ export const createShadow = async (
       if (!f.isFile()) continue;
       const src = path.join(f.parentPath, f.name);
       if (ignored(ctx, src)) continue;
-      await linkFile(
-        src,
-        path.join(ctx.runtimeDir, path.relative(dir, src)),
-      );
+      await linkFile(src, path.join(ctx.runtimeDir, path.relative(dir, src)));
     }
   };
 
@@ -132,8 +129,7 @@ export const createShadowHandler = (
 
     if (evt === "change") {
       const brandRel = relIn(brandDir, file);
-      const rel =
-        brandRel ?? (extendsDir ? relIn(extendsDir, file) : null);
+      const rel = brandRel ?? (extendsDir ? relIn(extendsDir, file) : null);
       if (!rel) return;
       // extends 檔被當前品牌覆蓋 → runtime 連的是 brand 版本,不受影響
       if (!brandRel && existsSync(path.join(brandDir, rel))) return;
@@ -222,9 +218,7 @@ export const shadowPlugin = (
           if (mods) {
             await Promise.all([...mods].map((m) => server.reloadModule(m)));
           }
-        })().catch((err) =>
-          console.error("[vite-plugin-white-label]", err),
-        );
+        })().catch((err) => console.error("[vite-plugin-white-label]", err));
       });
     },
 

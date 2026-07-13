@@ -155,26 +155,27 @@ $env:VITE_BRAND = "client-a"; pnpm vite build  # Windows PowerShell
 
 ### 共通オプション
 
-| オプション | デフォルト | 説明 |
-| --- | --- | --- |
-| `--dir` | `./brands` | brands ディレクトリ |
-| `--env-file` | `.env.development` | ブランド環境変数ファイル |
-| `--env-key` | `VITE_BRAND` | ブランド環境変数名 |
-| `--out-dir`, `-o` | `dist` | `build` の出力先ルート |
-| `--config`, `-c` | 自動検出 | `build` で使用する vite config のパス |
+| オプション        | デフォルト         | 説明                                  |
+| ----------------- | ------------------ | ------------------------------------- |
+| `--dir`           | `./brands`         | brands ディレクトリ                   |
+| `--env-file`      | `.env.development` | ブランド環境変数ファイル              |
+| `--env-key`       | `VITE_BRAND`       | ブランド環境変数名                    |
+| `--out-dir`, `-o` | `dist`             | `build` の出力先ルート                |
+| `--config`, `-c`  | 自動検出           | `build` で使用する vite config のパス |
 
 ## オプション(`defineBrandConfig` の第一引数)
 
 ```ts
 export default defineBrandConfig(
   {
-    brandsDir: "./brands",           // ブランドディレクトリ
-    runtimeDir: "./.runtime/brand",  // シャドウ合成先ディレクトリ(.gitignore に追加すること)
-    envKey: "VITE_BRAND",            // 現在のブランドを読み取る環境変数名
-    defaultBrand: "default",         // 環境変数が未設定の場合のデフォルトブランド
+    brandsDir: "./brands", // ブランドディレクトリ
+    runtimeDir: "./.runtime/brand", // シャドウ合成先ディレクトリ(.gitignore に追加すること)
+    envKey: "VITE_BRAND", // 現在のブランドを読み取る環境変数名
+    defaultBrand: "default", // 環境変数が未設定の場合のデフォルトブランド
     ignore: [".DS_Store", "public/"], // シャドウに含めないファイル名・パス断片
-    tailwind: false,                 // Tailwind v3 preset の同期(v4 では不要、下記参照)
-    aliases: {                       // プロジェクト固有の alias(任意)
+    tailwind: false, // Tailwind v3 preset の同期(v4 では不要、下記参照)
+    aliases: {
+      // プロジェクト固有の alias(任意)
       "@stores": "./src/stores",
     },
   },
@@ -188,12 +189,12 @@ export default defineBrandConfig(
 
 ### 組み込み alias
 
-| alias | 参照先 |
-| --- | --- |
-| `@brand` | `<runtimeDir>` |
-| `@brand-components` | `<runtimeDir>/components` |
-| `@brand-router` | `<runtimeDir>/extra-router` |
-| `@brand-assets` | `<runtimeDir>/assets` |
+| alias               | 参照先                      |
+| ------------------- | --------------------------- |
+| `@brand`            | `<runtimeDir>`              |
+| `@brand-components` | `<runtimeDir>/components`   |
+| `@brand-router`     | `<runtimeDir>/extra-router` |
+| `@brand-assets`     | `<runtimeDir>/assets`       |
 
 ### config.jsonc
 
@@ -201,8 +202,8 @@ export default defineBrandConfig(
 
 ```jsonc
 {
-  "title": "Client A",   // index.html 内の =VITE_TITLE= プレースホルダーを置換
-  "extends": "base"      // 継承するブランド名(省略可)
+  "title": "Client A", // index.html 内の =VITE_TITLE= プレースホルダーを置換
+  "extends": "base", // 継承するブランド名(省略可)
 }
 ```
 
@@ -246,7 +247,7 @@ v4 のテーマ設定は CSS ファイルそのものなので、シャドウデ
 各ブランドが独自の `tailwind.config.ts` を持つ場合はこちらを有効にします。
 
 ```ts
-defineBrandConfig({ tailwind: true }, /* ... */);
+defineBrandConfig({ tailwind: true } /* ... */);
 // または出力先を変更:{ tailwind: { presetPath: "./.brand-env/tailwind.preset.ts" } }
 ```
 
@@ -275,13 +276,13 @@ declare const DEV: boolean;
 
 dev モードでは Vite の `server.watcher` がリンクを維持し、HMR をトリガーします。モジュールグラフが保持しているのは runtime 側のパスなので、`brands/` 配下のファイルイベントが発生してリンクの更新が完了した後、プラグインが対応する runtime モジュールを特定して能動的にリロードします(フレームワーク非依存で `.vue` / `.tsx` / CSS すべてに共通)。エディタがアトミック書き込み(一時ファイルに書いてから rename する方式、例:JetBrains の safe write)で保存すると inode が入れ替わりハードリンクが古い内容を指したままになりますが、プラグインは inode の変化を検知して自動的に再リンクします。
 
-| イベント | 動作 |
-| --- | --- |
-| ブランドにファイルが追加された | runtime にリンク(元々 extends にリンクされていたファイルを上書き) |
-| ブランドからファイルが削除された | runtime のファイルを削除。extends に同名ファイルがあればそちらへフォールバックしてリンク |
-| extends にファイルが追加された | ブランド側に同名ファイルが存在しない場合のみリンクを追加 |
-| extends からファイルが削除された | ブランド側に同名ファイルが存在しない場合のみリンクを解除 |
-| ファイル内容が変更された | 同一 inode であれば自然に反映。アトミック書き込みで inode が変わった場合は自動的に再リンク |
+| イベント                         | 動作                                                                                       |
+| -------------------------------- | ------------------------------------------------------------------------------------------ |
+| ブランドにファイルが追加された   | runtime にリンク(元々 extends にリンクされていたファイルを上書き)                          |
+| ブランドからファイルが削除された | runtime のファイルを削除。extends に同名ファイルがあればそちらへフォールバックしてリンク   |
+| extends にファイルが追加された   | ブランド側に同名ファイルが存在しない場合のみリンクを追加                                   |
+| extends からファイルが削除された | ブランド側に同名ファイルが存在しない場合のみリンクを解除                                   |
+| ファイル内容が変更された         | 同一 inode であれば自然に反映。アトミック書き込みで inode が変わった場合は自動的に再リンク |
 
 ## 制限事項
 

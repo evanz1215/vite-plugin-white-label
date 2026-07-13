@@ -22,7 +22,9 @@ export const buildBrands = async (opts: {
   }
 
   for (const brand of opts.brands) {
-    console.log(`\n[vite-plugin-white-label] ======== build: ${brand} ========\n`);
+    console.log(
+      `\n[vite-plugin-white-label] ======== build: ${brand} ========\n`,
+    );
     // defineBrandConfig 的 loadEnv 會讀 process.env,優先於 .env 檔
     process.env.VITE_BRAND = brand;
 

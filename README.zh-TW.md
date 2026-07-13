@@ -155,26 +155,27 @@ $env:VITE_BRAND = "client-a"; pnpm vite build  # Windows PowerShell
 
 ### 通用選項
 
-| 選項 | 預設 | 說明 |
-| --- | --- | --- |
-| `--dir` | `./brands` | brands 目錄 |
-| `--env-file` | `.env.development` | 品牌環境變數檔 |
-| `--env-key` | `VITE_BRAND` | 品牌環境變數名 |
-| `--out-dir`, `-o` | `dist` | `build` 的輸出根目錄 |
-| `--config`, `-c` | 自動尋找 | `build` 用的 vite config 路徑 |
+| 選項              | 預設               | 說明                          |
+| ----------------- | ------------------ | ----------------------------- |
+| `--dir`           | `./brands`         | brands 目錄                   |
+| `--env-file`      | `.env.development` | 品牌環境變數檔                |
+| `--env-key`       | `VITE_BRAND`       | 品牌環境變數名                |
+| `--out-dir`, `-o` | `dist`             | `build` 的輸出根目錄          |
+| `--config`, `-c`  | 自動尋找           | `build` 用的 vite config 路徑 |
 
 ## 選項(`defineBrandConfig` 第一個參數)
 
 ```ts
 export default defineBrandConfig(
   {
-    brandsDir: "./brands",           // 品牌目錄
-    runtimeDir: "./.runtime/brand",  // shadow 合成目錄(記得加進 .gitignore)
-    envKey: "VITE_BRAND",            // 讀取當前品牌的環境變數名
-    defaultBrand: "default",         // 環境變數未設定時的預設品牌
+    brandsDir: "./brands", // 品牌目錄
+    runtimeDir: "./.runtime/brand", // shadow 合成目錄(記得加進 .gitignore)
+    envKey: "VITE_BRAND", // 讀取當前品牌的環境變數名
+    defaultBrand: "default", // 環境變數未設定時的預設品牌
     ignore: [".DS_Store", "public/"], // 不進 shadow 的檔名/路徑片段
-    tailwind: false,                 // Tailwind v3 preset 同步(v4 不需要,見下方)
-    aliases: {                       // 專案私有 alias(可選)
+    tailwind: false, // Tailwind v3 preset 同步(v4 不需要,見下方)
+    aliases: {
+      // 專案私有 alias(可選)
       "@stores": "./src/stores",
     },
   },
@@ -188,12 +189,12 @@ export default defineBrandConfig(
 
 ### 內建 alias
 
-| alias | 指向 |
-| --- | --- |
-| `@brand` | `<runtimeDir>` |
-| `@brand-components` | `<runtimeDir>/components` |
-| `@brand-router` | `<runtimeDir>/extra-router` |
-| `@brand-assets` | `<runtimeDir>/assets` |
+| alias               | 指向                        |
+| ------------------- | --------------------------- |
+| `@brand`            | `<runtimeDir>`              |
+| `@brand-components` | `<runtimeDir>/components`   |
+| `@brand-router`     | `<runtimeDir>/extra-router` |
+| `@brand-assets`     | `<runtimeDir>/assets`       |
 
 ### config.jsonc
 
@@ -201,8 +202,8 @@ export default defineBrandConfig(
 
 ```jsonc
 {
-  "title": "Client A",   // 取代 index.html 中的 =VITE_TITLE= 佔位符
-  "extends": "base"      // 繼承的品牌名稱(可省略)
+  "title": "Client A", // 取代 index.html 中的 =VITE_TITLE= 佔位符
+  "extends": "base", // 繼承的品牌名稱(可省略)
 }
 ```
 
@@ -246,7 +247,7 @@ v4 的主題設定就是 CSS 檔,shadow 目錄與繼承機制直接涵蓋,零設
 品牌各自帶 `tailwind.config.ts` 時開啟:
 
 ```ts
-defineBrandConfig({ tailwind: true }, /* ... */);
+defineBrandConfig({ tailwind: true } /* ... */);
 // 或自訂輸出位置:{ tailwind: { presetPath: "./.brand-env/tailwind.preset.ts" } }
 ```
 
@@ -275,13 +276,13 @@ declare const DEV: boolean;
 
 dev 模式下由 Vite server.watcher 維護連結並觸發 HMR:模組圖裡掛的是 runtime 路徑,`brands/` 的檔案事件在連結維護完成後,由 plugin 對應到 runtime 模組主動 reload(框架無關,`.vue`/`.tsx`/CSS 通用)。編輯器以原子寫入存檔(先寫暫存檔再 rename,如 JetBrains 的 safe write)會換掉 inode 造成 hard link 指向舊內容,plugin 會比對 inode 自動重連。
 
-| 事件 | 行為 |
-| --- | --- |
-| 品牌新增檔案 | 連進 runtime(覆蓋原本連到 extends 的檔) |
-| 品牌刪除檔案 | 移除 runtime 檔;extends 有同名檔則回退連 extends 版本 |
-| extends 新增檔案 | 僅當品牌沒有同名檔時補鏈 |
-| extends 刪除檔案 | 僅當品牌沒有同名檔時斷鏈 |
-| 檔案內容變更 | 同 inode 天然生效;原子寫入換 inode 時自動重連 |
+| 事件             | 行為                                                  |
+| ---------------- | ----------------------------------------------------- |
+| 品牌新增檔案     | 連進 runtime(覆蓋原本連到 extends 的檔)               |
+| 品牌刪除檔案     | 移除 runtime 檔;extends 有同名檔則回退連 extends 版本 |
+| extends 新增檔案 | 僅當品牌沒有同名檔時補鏈                              |
+| extends 刪除檔案 | 僅當品牌沒有同名檔時斷鏈                              |
+| 檔案內容變更     | 同 inode 天然生效;原子寫入換 inode 時自動重連         |
 
 ## 限制
 

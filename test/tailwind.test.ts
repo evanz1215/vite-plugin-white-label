@@ -27,7 +27,10 @@ const setup = async (tailwind: boolean | { presetPath?: string } = true) => {
 describe("tailwindPlugin", () => {
   it("等 shadowReady 後才同步:runtime 有設定檔就複製", async () => {
     const { ctx, write, presetPath, cleanup } = await setup();
-    await write(".runtime/brand/tailwind.config.ts", "export default { a: 1 };");
+    await write(
+      ".runtime/brand/tailwind.config.ts",
+      "export default { a: 1 };",
+    );
 
     let ready!: () => void;
     const shadowReady = new Promise<void>((r) => (ready = r));
@@ -80,7 +83,10 @@ describe("tailwindPlugin", () => {
 
   it("dev:server.watcher 收到品牌 tailwind.config.ts 變更時重新同步", async () => {
     const { ctx, write, presetPath, cleanup } = await setup();
-    await write(".runtime/brand/tailwind.config.ts", "export default { v: 1 };");
+    await write(
+      ".runtime/brand/tailwind.config.ts",
+      "export default { v: 1 };",
+    );
 
     const plugin = tailwindPlugin(ctx, Promise.resolve());
     await (plugin.configResolved as Function)();
@@ -96,15 +102,25 @@ describe("tailwindPlugin", () => {
     expect(watcher.add).toHaveBeenCalledWith(brandTwConfig);
 
     // 模擬品牌設定變更(hard link 下 runtime 檔內容已同步),事件觸發重新複製
-    await write(".runtime/brand/tailwind.config.ts", "export default { v: 2 };");
+    await write(
+      ".runtime/brand/tailwind.config.ts",
+      "export default { v: 2 };",
+    );
     watcher.emit("all", "change", brandTwConfig);
     await vi.waitFor(() =>
       expect(readFileSync(presetPath, "utf8")).toContain("v: 2"),
     );
 
     // 無關檔案的事件不觸發
-    await write(".runtime/brand/tailwind.config.ts", "export default { v: 3 };");
-    watcher.emit("all", "change", path.join(ctx.brandsDir, "client", "other.ts"));
+    await write(
+      ".runtime/brand/tailwind.config.ts",
+      "export default { v: 3 };",
+    );
+    watcher.emit(
+      "all",
+      "change",
+      path.join(ctx.brandsDir, "client", "other.ts"),
+    );
     await new Promise((r) => setTimeout(r, 20));
     expect(readFileSync(presetPath, "utf8")).toContain("v: 2");
 

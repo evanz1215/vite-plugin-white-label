@@ -120,19 +120,18 @@ describe("createShadowHandler", () => {
     await write("brands/client/public/favicon.ico", "icon");
     await handler("add", at("brands/client/public/favicon.ico"));
     expect(existsSync(path.join(ctx.runtimeDir, ".DS_Store"))).toBe(false);
-    expect(
-      existsSync(path.join(ctx.runtimeDir, "public/favicon.ico")),
-    ).toBe(false);
+    expect(existsSync(path.join(ctx.runtimeDir, "public/favicon.ico"))).toBe(
+      false,
+    );
 
     // brands 之外的路徑(server.watcher 會看到整個專案)
     await write("src/App.vue", "app");
     await handler("add", at("src/App.vue"));
-    expect(existsSync(path.join(ctx.runtimeDir, "../src/App.vue"))).toBe(
-      false,
-    );
+    expect(existsSync(path.join(ctx.runtimeDir, "../src/App.vue"))).toBe(false);
     const runtimeFiles = await fs.readdir(ctx.runtimeDir, { recursive: true });
-    expect(runtimeFiles.map(String).map((f) => f.replaceAll("\\", "/")))
-      .toEqual(["config.jsonc", "views", "views/Home.vue"]);
+    expect(
+      runtimeFiles.map(String).map((f) => f.replaceAll("\\", "/")),
+    ).toEqual(["config.jsonc", "views", "views/Home.vue"]);
 
     await cleanup();
   });
@@ -161,7 +160,8 @@ describe("shadowPlugin", () => {
 
     // configureServer:以假 watcher / moduleGraph 模擬 Vite server
     const watcher = Object.assign(new EventEmitter(), { add: vi.fn() });
-    const runtimeHome = ctx.runtimeDir.replaceAll("\\", "/") + "/views/Home.vue";
+    const runtimeHome =
+      ctx.runtimeDir.replaceAll("\\", "/") + "/views/Home.vue";
     const mod = { id: "home" };
     const server = {
       watcher,
@@ -198,8 +198,12 @@ describe("shadowPlugin", () => {
     const runtimeHome =
       ctx.runtimeDir.replaceAll("\\", "/") + "/views/Home.vue";
 
-    expect(hot({ file: at("brands/client/views/Home.vue"), modules })).toEqual([]);
-    expect(hot({ file: at("brands/base/views/Home.vue"), modules })).toEqual([]);
+    expect(hot({ file: at("brands/client/views/Home.vue"), modules })).toEqual(
+      [],
+    );
+    expect(hot({ file: at("brands/base/views/Home.vue"), modules })).toEqual(
+      [],
+    );
     expect(hot({ file: runtimeHome, modules })).toEqual([]);
     expect(hot({ file: "/other/src/App.vue", modules })).toBeUndefined();
 
