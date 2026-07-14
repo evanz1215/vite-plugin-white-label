@@ -53,12 +53,12 @@
     "json5": "^2.2.3"
   },
   "devDependencies": {
-    "@types/node": "^22.15.3",
+    "@types/node": "^26.1.1",
     "oxlint": "^1.73.0",
     "prettier": "^3.9.5",
     "tsup": "^8.3.5",
-    "typescript": "^5.5.4",
-    "vite": "^6.3.4",
-    "vitest": "^3.0.0"
+    "typescript": "^5.9.3",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
   }
 }
