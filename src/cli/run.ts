@@ -43,24 +43,22 @@ const yellow = (s: string) => styleText("yellow", s);
 export const run = async (argv: string[], io: RunIO = {}) => {
   const output = io.output ?? process.stdout;
 
-  // 整個 run 共用一個 readline,行輸入自行排隊:
-  // rl.question 會丟掉「沒有人在等」的行,pipe 進來的多行輸入會遺失
+  // 整個 run 共用一個 readline,以其內建的 async iterator 取行:
+  // iterator 本身就會緩衝「還沒被消費」的行(rl.question 才會丟掉),
+  // 不需要自己再刻一份 lines/waiters 佇列
   let rl: readline.Interface | undefined;
-  const lines: string[] = [];
-  const waiters: Array<(line: string) => void> = [];
-  const question = (q: string) => {
-    rl ??= readline
-      .createInterface({ input: io.input ?? process.stdin, output })
-      .on("line", (line) => {
-        const waiter = waiters.shift();
-        if (waiter) waiter(line);
-        else lines.push(line);
+  let lineIter: AsyncIterator<string> | undefined;
+  const question = async (q: string) => {
+    if (!rl) {
+      rl = readline.createInterface({
+        input: io.input ?? process.stdin,
+        output,
       });
+      lineIter = rl[Symbol.asyncIterator]();
+    }
     output.write(q);
-    const buffered = lines.shift();
-    return buffered !== undefined
-      ? Promise.resolve(buffered)
-      : new Promise<string>((r) => waiters.push(r));
+    const { value } = await lineIter!.next();
+    return value ?? "";
   };
 
   /** 數字選單(inquirer list 的原生替代);disabled 項照列但不可選 */
@@ -69,16 +67,18 @@ export const run = async (argv: string[], io: RunIO = {}) => {
     choices: { name: string; hint?: string; disabled?: boolean }[],
   ): Promise<string> => {
     output.write(`\n${message}\n`);
-    choices.forEach((c, i) =>
-      output.write(`  ${i + 1}) ${c.name}${c.hint ? ` ${c.hint}` : ""}\n`),
-    );
+    choices.forEach((c, i) => {
+      const hint = c.hint ? ` ${c.hint}` : "";
+      output.write(`  ${i + 1}) ${c.name}${hint}\n`);
+    });
     for (;;) {
       const answer = await question("請輸入編號: ");
       const choice = choices[Number(answer) - 1];
       if (choice && !choice.disabled) return choice.name;
-      output.write(
-        choice ? "該選項不可選,請重新輸入\n" : "無效的選項,請重新輸入\n",
-      );
+      const msg = choice
+        ? "該選項不可選,請重新輸入\n"
+        : "無效的選項,請重新輸入\n";
+      output.write(msg);
     }
   };
 
