@@ -25,8 +25,10 @@ export const tailwindPlugin = (
     await fs.mkdir(path.dirname(tw.presetPath), { recursive: true });
     if (existsSync(src)) {
       await fs.copyFile(src, tw.presetPath);
-    } else if (!existsSync(tw.presetPath)) {
-      // 品牌沒有 tailwind.config.ts 時給空 preset,讓根設定的 import 不會失敗
+    } else {
+      // 品牌沒有(或剛移除)tailwind.config.ts → 一律寫回空 preset。
+      // 這裡若加上 !existsSync(presetPath) 條件,刪掉品牌設定後舊 preset
+      // 會留在原地繼續生效。
       await fs.writeFile(tw.presetPath, "export default {};\n");
     }
   };

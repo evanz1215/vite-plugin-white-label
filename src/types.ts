@@ -13,6 +13,11 @@ export interface BrandOptions {
   tailwind?: boolean | { presetPath?: string };
   /** 額外注入的 resolve.alias(專案私有 alias 放這裡,套件只內建 @brand 系列) */
   aliases?: Record<string, string>;
+  /**
+   * 是否注入全域常數 DEV(= mode === "development")。預設 true。
+   * DEV 是很通用的識別字,且會蓋掉使用者自己的 define.DEV —— 有衝突時設 false。
+   */
+  defineDev?: boolean;
 }
 
 export interface ResolvedBrandOptions {

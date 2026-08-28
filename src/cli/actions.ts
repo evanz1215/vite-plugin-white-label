@@ -5,8 +5,12 @@
 import fs from "fs/promises";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
-import { parseEnv } from "node:util";
-import { DEFAULT_IGNORE, normalizePath, readBrandConfig } from "../options";
+import {
+  assertBrandName,
+  DEFAULT_IGNORE,
+  isIgnored,
+  readBrandConfig,
+} from "../options";
 import type { BrandConfig } from "../types";
 
 export interface CliContext {
@@ -27,16 +31,31 @@ export const listBrands = async (brandsDir: string) => {
     }));
 };
 
+/**
+ * 行首註解偵測。只看行首是刻意的:行尾註解要正確判斷得先剖析字串字面量
+ * (避免把 "https://..." 誤判成註解),為了一句警告不值得。
+ */
+const hasJsoncComment = (src: string) =>
+  src.split("\n").some((row) => {
+    const t = row.trimStart();
+    return t.startsWith("//") || t.startsWith("/*");
+  });
+
+/**
+ * 寫回 config.jsonc。回傳原檔是否帶有註解 —— JSON.stringify 寫不回註解,
+ * 呼叫端要據此提醒使用者。
+ */
 const writeBrandConfig = (
   brandsDir: string,
   brand: string,
   config: BrandConfig,
-) => {
-  // 注意:原檔若有註解會遺失(與原版行為一致)
-  writeFileSync(
-    path.join(brandsDir, brand, "config.jsonc"),
-    JSON.stringify(config, null, 2) + "\n",
-  );
+): boolean => {
+  const file = path.join(brandsDir, brand, "config.jsonc");
+  const commentsLost =
+    existsSync(file) && hasJsoncComment(readFileSync(file, "utf8"));
+
+  writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
+  return commentsLost;
 };
 
 /** 複製 srcDir 下的檔案到 destDir;overwrite=false 時已存在的檔案跳過 */
@@ -45,25 +64,37 @@ const copyBrandFiles = (srcDir: string, destDir: string, overwrite: boolean) =>
     recursive: true,
     force: overwrite,
     errorOnExist: false,
-    // 補尾斜線讓 "public/" 能整棵過濾掉目錄本身(不留空目錄)
+    // 比對基準是相對於來源品牌目錄的路徑,srcDir 自身(rel === "")一律放行
     filter: (src) => {
-      const p = normalizePath(src) + "/";
-      return !DEFAULT_IGNORE.some((item) => p.includes(item));
+      const rel = path.relative(srcDir, src);
+      return rel === "" || !isIgnored(DEFAULT_IGNORE, rel);
     },
   });
 
-/** switch:改寫 env 檔的品牌變數,保留其他 key */
+/**
+ * switch:就地替換 env 檔中品牌變數所在的那一行,其餘位元組完全不動。
+ *
+ * 不可用 parseEnv 再整份寫回 —— 那會丟掉註解、空行與 key 順序,且未加引號的
+ * 值會在 # 處被當成註解截斷(https://a.com/#hash 會變成 https://a.com/)。
+ */
 export const switchBrand = (ctx: CliContext, brand: string) => {
-  const parsed = existsSync(ctx.envFile)
-    ? parseEnv(readFileSync(ctx.envFile, "utf8"))
-    : {};
-  parsed[ctx.envKey] = brand;
-  writeFileSync(
-    ctx.envFile,
-    Object.entries(parsed)
-      .map(([k, v]) => `${k}=${v}`)
-      .join("\n") + "\n",
+  assertBrandName(brand); // 寫進 env 的值之後會成為 path.join 的輸入
+
+  const line = ctx.envKey + "=" + brand;
+  const src = existsSync(ctx.envFile) ? readFileSync(ctx.envFile, "utf8") : "";
+  const rows = src.split("\n");
+  const at = rows.findIndex((row) =>
+    row.trimStart().startsWith(ctx.envKey + "="),
   );
+
+  if (at >= 0) {
+    rows[at] = line;
+    writeFileSync(ctx.envFile, rows.join("\n"));
+    return;
+  }
+  // 沒有這個 key:附加到結尾,原內容一字不動
+  const tail = src === "" || src.endsWith("\n") ? "" : "\n";
+  writeFileSync(ctx.envFile, src + tail + line + "\n");
 };
 
 /**
@@ -77,6 +108,9 @@ export const createBrand = async (
   from: string,
   isolate: boolean,
 ) => {
+  assertBrandName(name);
+  assertBrandName(from);
+
   const target = path.join(ctx.brandsDir, name);
   if (existsSync(target)) {
     throw new Error(`品牌已存在:${name}`);
@@ -89,7 +123,7 @@ export const createBrand = async (
 
   if (!isolate) {
     writeBrandConfig(ctx.brandsDir, name, { title: name, extends: from });
-    return;
+    return { commentsLost: false }; // 全新檔案,沒有註解可失
   }
 
   const fromConfig = readBrandConfig(ctx.brandsDir, from);
@@ -104,11 +138,12 @@ export const createBrand = async (
 
   const config: BrandConfig = { ...fromConfig, title: name };
   delete config.extends;
-  writeBrandConfig(ctx.brandsDir, name, config);
+  return { commentsLost: writeBrandConfig(ctx.brandsDir, name, config) };
 };
 
 /** isolate:把 extends 中未被覆蓋的檔案實體複製進品牌,並移除 extends 設定 */
 export const isolateBrand = async (ctx: CliContext, brand: string) => {
+  assertBrandName(brand);
   const config = readBrandConfig(ctx.brandsDir, brand);
   if (!config.extends) {
     throw new Error(`品牌 ${brand} 沒有 extends 設定,毋須獨立`);
@@ -121,5 +156,5 @@ export const isolateBrand = async (ctx: CliContext, brand: string) => {
   );
 
   delete config.extends;
-  writeBrandConfig(ctx.brandsDir, brand, config);
+  return { commentsLost: writeBrandConfig(ctx.brandsDir, brand, config) };
 };

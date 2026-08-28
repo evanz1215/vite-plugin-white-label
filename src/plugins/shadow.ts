@@ -3,7 +3,7 @@ import { existsSync } from "fs";
 import path from "path";
 import type { Plugin } from "vite";
 import type { ResolvedBrandOptions, BrandConfig } from "../types";
-import { normalizePath, readBrandConfig } from "../options";
+import { isIgnored, normalizePath, readBrandConfig } from "../options";
 
 /**
  * Shadow plugin:建立並維護 .runtime/brand 硬連結合成目錄。
@@ -11,9 +11,37 @@ import { normalizePath, readBrandConfig } from "../options";
  * dev 監聽改用 Vite 自帶的 server.watcher(生命週期由 Vite 管理),不另起 chokidar。
  */
 
-const ignored = (ctx: ResolvedBrandOptions, target: string) => {
-  const p = normalizePath(target);
-  return ctx.ignore.some((item) => p.includes(item));
+/**
+ * shadow 目錄的所有權標記。runtimeDir 是使用者可設定的選項,而 createShadow
+ * 會整個清空它 —— 誤設成 "./src" 就等於刪光原始碼。有此標記才視為本套件所建。
+ */
+export const MARKER = ".vite-plugin-white-label";
+
+/** title 會被塞進 index.html,插入前先跳脫;來源雖是本機 config.jsonc,仍不該原樣注入標記 */
+const escapeHtml = (s: string) =>
+  s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;"); // 單引號屬性 content='…' 同樣要擋
+
+/** 清空並重建 runtimeDir;拒絕動不是自己建立的目錄 */
+const clearRuntimeDir = async (runtimeDir: string) => {
+  if (existsSync(runtimeDir)) {
+    // 空目錄刪掉沒有任何損失,不必有 marker 也放行 —— 否則 git checkout 之後
+    // 留下的空 .runtime/brand 會直接擋住 dev server。
+    const entries = await fs.readdir(runtimeDir);
+    if (entries.length > 0 && !existsSync(path.join(runtimeDir, MARKER))) {
+      throw new Error(
+        `runtimeDir 已存在且不是本套件建立的,拒絕刪除:${runtimeDir}` +
+          `\n若確定要用這個目錄,請先自行清空。`,
+      );
+    }
+    await fs.rm(runtimeDir, { recursive: true, force: true });
+  }
+  await fs.mkdir(runtimeDir, { recursive: true });
+  await fs.writeFile(path.join(runtimeDir, MARKER), "");
 };
 
 /** hard link,跨分割區時 fallback 為 copy */
@@ -51,8 +79,7 @@ export const createShadow = async (
   ctx: ResolvedBrandOptions,
   brandConfig: BrandConfig,
 ) => {
-  await fs.rm(ctx.runtimeDir, { recursive: true, force: true });
-  await fs.mkdir(ctx.runtimeDir, { recursive: true });
+  await clearRuntimeDir(ctx.runtimeDir);
 
   const linkBrand = async (brand: string) => {
     const dir = path.join(ctx.brandsDir, brand);
@@ -68,10 +95,9 @@ export const createShadow = async (
       files
         .filter((f) => f.isFile())
         .map((f) => path.join(f.parentPath, f.name))
-        .filter((src) => !ignored(ctx, src))
-        .map((src) =>
-          linkFile(src, path.join(ctx.runtimeDir, path.relative(dir, src))),
-        ),
+        .map((src) => ({ src, rel: path.relative(dir, src) }))
+        .filter(({ rel }) => !isIgnored(ctx.ignore, rel))
+        .map(({ src, rel }) => linkFile(src, path.join(ctx.runtimeDir, rel))),
     );
   };
 
@@ -129,12 +155,10 @@ export const createShadowHandler = (
     : null;
 
   return async (evt: string, file: string) => {
-    if (ignored(ctx, file)) return;
-
     if (evt === "change") {
       const brandRel = relIn(brandDir, file);
       const rel = brandRel ?? (extendsDir ? relIn(extendsDir, file) : null);
-      if (!rel) return;
+      if (!rel || isIgnored(ctx.ignore, rel)) return;
       // extends 檔被當前品牌覆蓋 → runtime 連的是 brand 版本,不受影響
       if (!brandRel && existsSync(path.join(brandDir, rel))) return;
       await relinkIfStale(file, path.join(ctx.runtimeDir, rel));
@@ -145,6 +169,7 @@ export const createShadowHandler = (
 
     const brandRel = relIn(brandDir, file);
     if (brandRel) {
+      if (isIgnored(ctx.ignore, brandRel)) return;
       const runtimeFile = path.join(ctx.runtimeDir, brandRel);
       if (evt === "add") {
         await linkFile(file, runtimeFile);
@@ -159,7 +184,7 @@ export const createShadowHandler = (
     }
 
     const extRel = extendsDir && relIn(extendsDir, file);
-    if (!extRel) return;
+    if (!extRel || isIgnored(ctx.ignore, extRel)) return;
     // 當前品牌有同名檔 → runtime 連的是 brand 版本,extends 的變動不影響
     if (existsSync(path.join(brandDir, extRel))) return;
 
@@ -172,11 +197,91 @@ export const createShadowHandler = (
   };
 };
 
+/** createWatchHandler 需要的 server 能力,抽成介面讓事件流程可單元測試 */
+export interface ShadowWatchDeps {
+  /** 對 runtime 檔對應的模組觸發 HMR */
+  reload: (runtimeFile: string) => void | Promise<void>;
+  /** 整頁重載(繼承鏈變動時細粒度 HMR 沒有意義) */
+  fullReload: () => void;
+}
+
+/**
+ * dev 事件總管:維護連結、處理 config.jsonc 變更、觸發 HMR。
+ *
+ * 兩件事必須在這裡集中處理:
+ * 1. 事件序列化 —— 原子寫入會連續丟出 unlink + add,各開一條 async 鏈的話會交錯,
+ *    linkFile 的 existsSync → unlink → link 也就被插隊(TOCTOU)。
+ * 2. config.jsonc 熱更新 —— brandConfig 原本只在 configResolved 讀一次,
+ *    改 extends 後舊的繼承 handler 會繼續維護錯誤的連結。
+ */
+export const createWatchHandler = (
+  ctx: ResolvedBrandOptions,
+  initialConfig: BrandConfig,
+  deps: ShadowWatchDeps,
+) => {
+  let brandConfig = initialConfig;
+  let handler = createShadowHandler(ctx, brandConfig);
+
+  /** 監聽清單依 extends 而變,每次事件都要重算 */
+  const configFiles = () =>
+    [ctx.brand, brandConfig.extends]
+      .filter((b): b is string => Boolean(b))
+      .flatMap((brand) =>
+        ["config.jsonc", "config.json"].map((f) =>
+          normalizePath(path.join(ctx.brandsDir, brand, f)),
+        ),
+      );
+
+  const onEvent = async (evt: string, file: string) => {
+    if (configFiles().includes(normalizePath(file))) {
+      brandConfig = readBrandConfig(ctx.brandsDir, ctx.brand);
+      await createShadow(ctx, brandConfig);
+      handler = createShadowHandler(ctx, brandConfig);
+      deps.fullReload();
+      return;
+    }
+
+    await handler(evt, file);
+
+    // 模組圖掛的是 runtime 路徑,brands/ 的事件 Vite 不會自己觸發 HMR;
+    // 且原子寫入存檔可能以 unlink+add 而非 change 呈現 —— 因此在連結
+    // 維護完成後,由這裡統一對 runtime 模組觸發 reload。
+    const brandDir = path.join(ctx.brandsDir, ctx.brand);
+    const extendsDir = brandConfig.extends
+      ? path.join(ctx.brandsDir, brandConfig.extends)
+      : null;
+    const rel =
+      relIn(brandDir, file) ?? (extendsDir ? relIn(extendsDir, file) : null);
+    if (!rel || isIgnored(ctx.ignore, rel)) return;
+
+    const runtimeFile = path.join(ctx.runtimeDir, rel);
+    if (!existsSync(runtimeFile)) return;
+    await deps.reload(runtimeFile);
+  };
+
+  // ponytail: 全域序列化佇列,dev 場景事件量小;要平行化才需要改成 per-file lock
+  let queue: Promise<void> = Promise.resolve();
+
+  return {
+    enqueue: (evt: string, file: string) => {
+      queue = queue
+        .then(() => onEvent(evt, file))
+        .catch((err) => console.error("[vite-plugin-white-label]", err));
+      return queue;
+    },
+    getConfig: () => brandConfig,
+  };
+};
+
 export const shadowPlugin = (
   ctx: ResolvedBrandOptions,
   onReady: () => void,
+  onFailed: (err: unknown) => void,
 ): Plugin => {
   let brandConfig: BrandConfig = {};
+  let watch: ReturnType<typeof createWatchHandler> | undefined;
+  /** 一律讀最新設定:config.jsonc 可能在 dev 期間被改過 */
+  const currentConfig = () => watch?.getConfig() ?? brandConfig;
 
   return {
     name: "vite-plugin-white-label:shadow",
@@ -189,59 +294,56 @@ export const shadowPlugin = (
     },
 
     async configResolved() {
-      brandConfig = readBrandConfig(ctx.brandsDir, ctx.brand);
-      await createShadow(ctx, brandConfig);
+      try {
+        brandConfig = readBrandConfig(ctx.brandsDir, ctx.brand);
+        await createShadow(ctx, brandConfig);
+      } catch (err) {
+        onFailed(err); // 不轉發的話 tailwind 的 await shadowReady 會永久 pending
+        throw err;
+      }
       onReady();
     },
 
     configureServer(server) {
       server.watcher.add(ctx.brandsDir);
-      const handler = createShadowHandler(ctx, brandConfig);
-      const brandDir = path.join(ctx.brandsDir, ctx.brand);
-      const extendsDir = brandConfig.extends
-        ? path.join(ctx.brandsDir, brandConfig.extends)
-        : null;
-
-      server.watcher.on("all", (evt, file) => {
-        (async () => {
-          await handler(evt, file);
-
-          // 模組圖掛的是 runtime 路徑,brands/ 的事件 Vite 不會自己觸發 HMR;
-          // 且原子寫入存檔可能以 unlink+add 而非 change 呈現 —— 因此在連結
-          // 維護完成後,由這裡統一對 runtime 模組觸發 reload。
-          if (ignored(ctx, file)) return;
-          const rel =
-            relIn(brandDir, file) ??
-            (extendsDir ? relIn(extendsDir, file) : null);
-          if (!rel) return;
-          const runtimeFile = path.join(ctx.runtimeDir, rel);
-          if (!existsSync(runtimeFile)) return;
+      watch = createWatchHandler(ctx, brandConfig, {
+        reload: async (runtimeFile) => {
           const mods = server.moduleGraph.getModulesByFile(
             normalizePath(runtimeFile),
           );
           if (mods) {
             await Promise.all([...mods].map((m) => server.reloadModule(m)));
           }
-        })().catch((err) => console.error("[vite-plugin-white-label]", err));
+        },
+        fullReload: () => server.ws.send({ type: "full-reload" }),
       });
-    },
 
-    /** 以品牌 config.jsonc 的 title 取代 index.html 中的 =VITE_TITLE= 佔位符 */
-    transformIndexHtml(html) {
-      return brandConfig.title
-        ? html.replace("=VITE_TITLE=", brandConfig.title)
-        : html;
+      server.watcher.on("all", (evt, file) => void watch!.enqueue(evt, file));
     },
 
     /**
-     * HMR 統一由 configureServer 的 watcher 觸發(reloadModule),
+     * 以品牌 config.jsonc 的 title 取代標題佔位符。
+     * %VITE_TITLE% 是 Vite 原生語法(建議用法);=VITE_TITLE= 為相容保留。
+     */
+    transformIndexHtml(html) {
+      const title = currentConfig().title;
+      if (!title) return html;
+      const safe = escapeHtml(title);
+      return html
+        .replaceAll("%VITE_TITLE%", safe)
+        .replaceAll("=VITE_TITLE=", safe);
+    },
+
+    /**
+     * HMR 統一由 createWatchHandler 觸發(reload/fullReload),
      * 這裡只抑制 Vite 對 brands/ 與 runtime 檔案的預設 hot update,避免雙重觸發
      * (macOS 上同 inode 的變更會兩條路徑都發事件;框架無關,.vue/.tsx/css 通用)。
      */
     handleHotUpdate({ file }) {
+      const config = currentConfig();
       const brandDir = path.join(ctx.brandsDir, ctx.brand);
-      const extendsDir = brandConfig.extends
-        ? path.join(ctx.brandsDir, brandConfig.extends)
+      const extendsDir = config.extends
+        ? path.join(ctx.brandsDir, config.extends)
         : null;
 
       if (

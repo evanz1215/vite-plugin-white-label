@@ -51,18 +51,17 @@ describe("tailwindPlugin", () => {
     await cleanup();
   });
 
-  it("runtime 沒有設定檔:preset 不存在時寫入空 preset,已存在則不覆蓋", async () => {
+  it("runtime 沒有設定檔:一律寫回空 preset(不保留前一個品牌的殘留)", async () => {
     const { ctx, presetPath, cleanup } = await setup();
     const plugin = tailwindPlugin(ctx, Promise.resolve());
 
     await (plugin.configResolved as Function)();
     expect(readFileSync(presetPath, "utf8")).toBe("export default {};\n");
 
-    await fs.writeFile(presetPath, "export default { keep: true };");
+    // 舊行為是「已存在就不覆蓋」,會讓切換品牌後舊 preset 繼續生效
+    await fs.writeFile(presetPath, "export default { stale: true };");
     await (plugin.configResolved as Function)();
-    expect(readFileSync(presetPath, "utf8")).toBe(
-      "export default { keep: true };",
-    );
+    expect(readFileSync(presetPath, "utf8")).toBe("export default {};\n");
 
     await cleanup();
   });
@@ -123,6 +122,30 @@ describe("tailwindPlugin", () => {
     );
     await new Promise((r) => setTimeout(r, 20));
     expect(readFileSync(presetPath, "utf8")).toContain("v: 2");
+
+    await cleanup();
+  });
+});
+
+describe("preset 殘留", () => {
+  it("品牌設定被刪除後 preset 要退回空設定,而非留著舊內容", async () => {
+    const { ctx, write, presetPath, cleanup } = await setup();
+    await write(
+      ".runtime/brand/tailwind.config.ts",
+      "export default { theme: 1 };",
+    );
+
+    const shadowReady = Promise.resolve();
+    const plugin = tailwindPlugin(ctx, shadowReady);
+
+    await (plugin.configResolved as Function)();
+    expect(readFileSync(presetPath, "utf8")).toContain("theme");
+
+    // 品牌移除 tailwind.config.ts → shadow 內的連結也跟著消失
+    await fs.rm(path.join(ctx.runtimeDir, "tailwind.config.ts"));
+    await (plugin.configResolved as Function)();
+
+    expect(readFileSync(presetPath, "utf8")).toBe("export default {};\n");
 
     await cleanup();
   });

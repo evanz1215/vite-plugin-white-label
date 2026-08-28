@@ -7,6 +7,8 @@ import path from "path";
 import {
   createShadow,
   createShadowHandler,
+  createWatchHandler,
+  MARKER,
   shadowPlugin,
 } from "../src/plugins/shadow";
 import { resolveOptions } from "../src/options";
@@ -131,7 +133,7 @@ describe("createShadowHandler", () => {
     const runtimeFiles = await fs.readdir(ctx.runtimeDir, { recursive: true });
     expect(
       runtimeFiles.map(String).map((f) => f.replaceAll("\\", "/")),
-    ).toEqual(["config.jsonc", "views", "views/Home.vue"]);
+    ).toEqual([MARKER, "config.jsonc", "views", "views/Home.vue"]);
 
     await cleanup();
   });
@@ -142,7 +144,7 @@ describe("shadowPlugin", () => {
     const { root, ctx, write, at, readRuntime, cleanup } = await setup();
 
     const onReady = vi.fn();
-    const plugin = shadowPlugin(ctx, onReady);
+    const plugin = shadowPlugin(ctx, onReady, vi.fn());
 
     // config:publicDir 指向當前品牌的 public
     const conf = (plugin.config as Function)();
@@ -190,7 +192,7 @@ describe("shadowPlugin", () => {
 
   it("handleHotUpdate:brands / runtime 事件一律抑制(HMR 由 watcher 觸發),其餘不介入", async () => {
     const { ctx, at, cleanup } = await setup();
-    const plugin = shadowPlugin(ctx, () => {});
+    const plugin = shadowPlugin(ctx, () => {}, vi.fn());
     await (plugin.configResolved as Function)({}); // 載入 brandConfig(extends: base)
     const hot = plugin.handleHotUpdate as Function;
 
@@ -206,6 +208,136 @@ describe("shadowPlugin", () => {
     );
     expect(hot({ file: runtimeHome, modules })).toEqual([]);
     expect(hot({ file: "/other/src/App.vue", modules })).toBeUndefined();
+
+    await cleanup();
+  });
+});
+
+describe("createWatchHandler", () => {
+  const deps = () => {
+    const reloaded: string[] = [];
+    let fullReloads = 0;
+    return {
+      reloaded,
+      counts: () => fullReloads,
+      deps: {
+        reload: (f: string) => {
+          reloaded.push(f);
+        },
+        fullReload: () => {
+          fullReloads += 1;
+        },
+      },
+    };
+  };
+
+  it("config.jsonc 的 extends 變更會重讀設定並重建 shadow", async () => {
+    const { ctx, write, at, readRuntime, cleanup } = await setup();
+    await write("brands/base-v2/views/Home.vue", "v2-home");
+
+    const d = deps();
+    const watch = createWatchHandler(ctx, { extends: "base" }, d.deps);
+    expect(await readRuntime("views/Home.vue")).toBe("base-home");
+
+    await write("brands/client/config.jsonc", `{ "extends": "base-v2" }`);
+    await watch.enqueue("change", at("brands/client/config.jsonc"));
+
+    expect(await readRuntime("views/Home.vue")).toBe("v2-home");
+    expect(watch.getConfig().extends).toBe("base-v2");
+    expect(d.counts()).toBe(1); // 繼承鏈換了,細粒度 HMR 沒有意義
+
+    await cleanup();
+  });
+
+  it("config.jsonc 的 title 變更即時反映,不必重啟 dev server", async () => {
+    const { ctx, write, at, cleanup } = await setup();
+
+    const watch = createWatchHandler(ctx, { extends: "base" }, deps().deps);
+
+    await write(
+      "brands/client/config.jsonc",
+      `{ "title": "New", "extends": "base" }`,
+    );
+    await watch.enqueue("change", at("brands/client/config.jsonc"));
+
+    expect(watch.getConfig().title).toBe("New");
+
+    await cleanup();
+  });
+
+  it("交錯的 unlink/add 事件被序列化,最終狀態一致", async () => {
+    const { ctx, write, at, readRuntime, cleanup } = await setup();
+    await write("brands/client/views/Home.vue", "client-home");
+
+    const watch = createWatchHandler(ctx, { extends: "base" }, deps().deps);
+    const file = at("brands/client/views/Home.vue");
+
+    // 模擬 atomic write:watcher 連續丟出 unlink + add,兩者不等待彼此
+    const a = watch.enqueue("unlink", file);
+    const b = watch.enqueue("add", file);
+    await Promise.all([a, b]);
+
+    expect(await readRuntime("views/Home.vue")).toBe("client-home");
+
+    await cleanup();
+  });
+});
+
+describe("transformIndexHtml", () => {
+  const html = (plugin: ReturnType<typeof shadowPlugin>, src: string) =>
+    (plugin.transformIndexHtml as Function)(src) as string;
+
+  it("title 做 HTML escape,不得注入可執行標記", async () => {
+    const { ctx, write, cleanup } = await setup();
+    await write(
+      "brands/client/config.jsonc",
+      JSON.stringify({ title: "</title><script>alert(1)</script>" }),
+    );
+
+    const plugin = shadowPlugin(ctx, () => {}, vi.fn());
+    await (plugin.configResolved as Function)({ mode: "development" });
+
+    const out = html(plugin, "<title>=VITE_TITLE=</title>");
+    expect(out).not.toContain("<script>");
+    expect(out).toContain("&lt;script&gt;");
+
+    await cleanup();
+  });
+
+  it("同時支援 Vite 原生的 %VITE_TITLE% 佔位符", async () => {
+    const { ctx, cleanup } = await setup();
+
+    const plugin = shadowPlugin(ctx, () => {}, vi.fn());
+    await (plugin.configResolved as Function)({ mode: "development" });
+
+    expect(html(plugin, "<title>%VITE_TITLE%</title>")).toBe(
+      "<title>Client</title>",
+    );
+    expect(html(plugin, "<title>=VITE_TITLE=</title>")).toBe(
+      "<title>Client</title>",
+    );
+
+    await cleanup();
+  });
+});
+
+describe("title escape 的屬性情境", () => {
+  it("單引號也要跳脫,否則單引號屬性可被逃逸", async () => {
+    const { ctx, write, cleanup } = await setup();
+    await write(
+      "brands/client/config.jsonc",
+      JSON.stringify({ title: "a' onload='alert(1)" }),
+    );
+
+    const plugin = shadowPlugin(ctx, () => {}, vi.fn());
+    await (plugin.configResolved as Function)({ mode: "development" });
+
+    const out = (plugin.transformIndexHtml as Function)(
+      "<meta name='x' content='%VITE_TITLE%'>",
+    ) as string;
+
+    expect(out).not.toContain("onload='");
+    expect(out).toContain("&#39;");
 
     await cleanup();
   });

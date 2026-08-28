@@ -13,6 +13,7 @@ import {
   switchBrand,
   type CliContext,
 } from "./actions";
+import { assertBrandName, DEFAULT_ENV_KEY } from "../options";
 import { buildBrands } from "./build";
 
 export interface RunIO {
@@ -100,7 +101,7 @@ export const run = async (argv: string[], io: RunIO = {}) => {
     options: {
       dir: { type: "string", default: "./brands" },
       "env-file": { type: "string", default: ".env.development" },
-      "env-key": { type: "string", default: "VITE_BRAND" },
+      "env-key": { type: "string", default: DEFAULT_ENV_KEY },
       from: { type: "string", short: "f" },
       isolate: { type: "boolean", short: "i", default: false },
       "out-dir": { type: "string", short: "o", default: "dist" },
@@ -148,6 +149,7 @@ export const run = async (argv: string[], io: RunIO = {}) => {
             })),
           ));
 
+        assertBrandName(brand);
         if (!brands.some((t) => t.name === brand)) {
           throw new Error(`品牌不存在:${brand}`);
         }
@@ -157,14 +159,15 @@ export const run = async (argv: string[], io: RunIO = {}) => {
       }
 
       case "create": {
-        const name =
+        const name = assertBrandName(
           args[0] ??
-          (await ask(
-            "請輸入品牌名稱",
-            (input) =>
-              /^[a-z0-9][a-z0-9-]{2,}$/.test(input) ||
-              "至少 3 個字元,僅限小寫英數與 -",
-          ));
+            (await ask(
+              "請輸入品牌名稱",
+              (input) =>
+                /^[a-z0-9][a-z0-9-]{2,}$/.test(input) ||
+                "至少 3 個字元,僅限小寫英數與 -",
+            )),
+        );
 
         const brands = await requireBrands();
         const from =
@@ -177,8 +180,11 @@ export const run = async (argv: string[], io: RunIO = {}) => {
             })),
           ));
 
-        await createBrand(ctx, name, from, values.isolate);
+        const created = await createBrand(ctx, name, from, values.isolate);
         output.write(`\n${green("✔")} 品牌 ${name} 已建立(來源:${from})\n`);
+        if (created.commentsLost) {
+          output.write(`${yellow("!")} 來源 config.jsonc 的註解未能保留\n`);
+        }
         if (existsSync(path.join(ctx.brandsDir, from, "public"))) {
           output.write(
             `${yellow("!")} 來源品牌有 public 目錄,public 不會被複製/繼承,請自行處理\n`,
@@ -194,18 +200,22 @@ export const run = async (argv: string[], io: RunIO = {}) => {
           throw new Error("沒有可獨立的品牌(皆無 extends 設定)");
         }
 
-        const brand =
+        const brand = assertBrandName(
           args[0] ??
-          (await pick(
-            "請選擇要獨立的品牌",
-            candidates.map((t) => ({
-              name: t.name,
-              hint: `(繼承自 ${t.config.extends})`,
-            })),
-          ));
+            (await pick(
+              "請選擇要獨立的品牌",
+              candidates.map((t) => ({
+                name: t.name,
+                hint: `(繼承自 ${t.config.extends})`,
+              })),
+            )),
+        );
 
-        await isolateBrand(ctx, brand);
+        const isolated = await isolateBrand(ctx, brand);
         output.write(`\n${green("✔")} 品牌 ${brand} 已獨立\n`);
+        if (isolated.commentsLost) {
+          output.write(`${yellow("!")} config.jsonc 的註解未能保留\n`);
+        }
         break;
       }
 
@@ -218,6 +228,7 @@ export const run = async (argv: string[], io: RunIO = {}) => {
           brandsDir: ctx.brandsDir,
           brands,
           outDir: values["out-dir"],
+          envKey: ctx.envKey,
           configFile: values.config,
         });
         break;

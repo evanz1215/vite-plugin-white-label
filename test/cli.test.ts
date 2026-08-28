@@ -12,7 +12,13 @@ import {
   type CliContext,
 } from "../src/cli/actions";
 import { run } from "../src/cli/run";
-import { readBrandConfig } from "../src/options";
+import { buildBrands } from "../src/cli/build";
+import {
+  assertBrandName,
+  assertInside,
+  readBrandConfig,
+  resolveOptions,
+} from "../src/options";
 
 const setup = async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "vpt-cli-"));
@@ -271,6 +277,236 @@ describe("cli run", () => {
     await expect(
       runCli(["isolate", "--dir", ctx.brandsDir, "--env-file", ctx.envFile]),
     ).rejects.toThrow("沒有可獨立的品牌");
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
+
+describe("路徑邊界", () => {
+  it("assertBrandName 只接受小寫英數與 -,擋掉所有路徑字元", () => {
+    expect(assertBrandName("client-a")).toBe("client-a");
+    expect(assertBrandName("a1")).toBe("a1");
+
+    const bad = [
+      "../outside",
+      "..",
+      ".",
+      "a/b",
+      "a\b",
+      "/abs",
+      "C:/x",
+      "Client",
+      "_x",
+      "-x",
+      "",
+    ];
+    for (const name of bad) {
+      expect(() => assertBrandName(name), name).toThrow("品牌名不合法");
+    }
+  });
+
+  it("assertInside 擋住解析後逃出 base 的路徑", () => {
+    const base = path.resolve(os.tmpdir(), "vpt-inside");
+    const inside = path.join(base, "dist", "a");
+
+    expect(assertInside(base, inside)).toBe(inside);
+    expect(assertInside(base, base)).toBe(base); // base 自身視為在內
+
+    expect(() => assertInside(base, path.resolve(base, ".."))).toThrow(
+      "路徑逃逸",
+    );
+    expect(() => assertInside(base, path.resolve(base, "../sibling"))).toThrow(
+      "路徑逃逸",
+    );
+  });
+
+  it("build 擋下逃出 brandsDir 的品牌名,目標目錄不受影響", async () => {
+    const { root, ctx } = await setup();
+    await fs.mkdir(path.join(root, "src"), { recursive: true });
+    await fs.writeFile(path.join(root, "src/keep.ts"), "precious");
+
+    const cwd = process.cwd();
+    process.chdir(root); // 讓 outDir 解析鎖在 tmpdir 內,測試本身無破壞性
+    try {
+      await expect(
+        buildBrands({
+          brandsDir: ctx.brandsDir,
+          brands: ["../src"],
+          outDir: "dist",
+          envKey: "VITE_BRAND",
+        }),
+      ).rejects.toThrow("品牌名不合法");
+    } finally {
+      process.chdir(cwd);
+    }
+
+    expect(readFileSync(path.join(root, "src/keep.ts"), "utf8")).toBe(
+      "precious",
+    );
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("build 擋下逃出專案根的 out-dir", async () => {
+    const { root, ctx } = await setup();
+
+    const cwd = process.cwd();
+    process.chdir(root);
+    try {
+      await expect(
+        buildBrands({
+          brandsDir: ctx.brandsDir,
+          brands: ["base"],
+          outDir: "..",
+          envKey: "VITE_BRAND",
+        }),
+      ).rejects.toThrow("路徑逃逸");
+    } finally {
+      process.chdir(cwd);
+    }
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("create 的 positional 名稱不再繞過驗證,--from 同樣受檢", async () => {
+    const { root, ctx } = await setup();
+    const base = ["--dir", ctx.brandsDir, "--env-file", ctx.envFile];
+
+    await expect(
+      runCli(["create", "../outside", "-f", "base", ...base]),
+    ).rejects.toThrow("品牌名不合法");
+    expect(existsSync(path.join(root, "outside"))).toBe(false);
+
+    await expect(
+      createBrand(ctx, "ok-name", "../../etc", false),
+    ).rejects.toThrow("品牌名不合法");
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("switch / isolate 的品牌名走同一道驗證", async () => {
+    const { root, ctx } = await setup();
+    const base = ["--dir", ctx.brandsDir, "--env-file", ctx.envFile];
+
+    await expect(runCli(["switch", "../x", ...base])).rejects.toThrow(
+      "品牌名不合法",
+    );
+    await expect(runCli(["isolate", "../x", ...base])).rejects.toThrow(
+      "品牌名不合法",
+    );
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("resolveOptions 擋下由 env 注入的逃逸品牌名", () => {
+    expect(() =>
+      resolveOptions({}, { VITE_BRAND: "../../etc" }, "/proj"),
+    ).toThrow("品牌名不合法");
+    expect(() => resolveOptions({ defaultBrand: "../x" }, {}, "/proj")).toThrow(
+      "品牌名不合法",
+    );
+  });
+});
+
+describe("build 的 envKey", () => {
+  it("build 設定的是自訂 envKey 而非硬編的 VITE_BRAND", async () => {
+    const { root, ctx } = await setup();
+    delete process.env.BRAND;
+
+    const cwd = process.cwd();
+    process.chdir(root);
+    try {
+      // tmpdir 沒有 index.html,vite build 必然失敗;此處只驗證失敗前已設對環境變數
+      await buildBrands({
+        brandsDir: ctx.brandsDir,
+        brands: ["base"],
+        outDir: "dist",
+        envKey: "BRAND",
+      }).catch(() => {});
+    } finally {
+      process.chdir(cwd);
+    }
+
+    expect(process.env.BRAND).toBe("base");
+    delete process.env.BRAND;
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
+
+describe("switchBrand 就地替換", () => {
+  it("保留註解、空行、順序與未加引號的 # 值", async () => {
+    const { root, ctx } = await setup();
+    const original = [
+      "# 品牌設定",
+      "VITE_BRAND=base",
+      "",
+      "# API",
+      "VITE_API=https://a.com/#hash",
+      'VITE_MSG="hello world"',
+      "",
+    ].join("\n");
+    await fs.writeFile(ctx.envFile, original);
+
+    switchBrand(ctx, "client");
+
+    // 完整字串比對:註解、順序、# 值、引號任何一項壞掉都會被抓到
+    expect(readFileSync(ctx.envFile, "utf8")).toBe(
+      original.replace("VITE_BRAND=base", "VITE_BRAND=client"),
+    );
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("env 檔沒有該 key 時附加到結尾,不動既有內容", async () => {
+    const { root, ctx } = await setup();
+    await fs.writeFile(ctx.envFile, "# 只有註解\nVITE_OTHER=keep\n");
+
+    switchBrand(ctx, "client");
+
+    expect(readFileSync(ctx.envFile, "utf8")).toBe(
+      "# 只有註解\nVITE_OTHER=keep\nVITE_BRAND=client\n",
+    );
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
+
+describe("JSONC 註解遺失警告", () => {
+  it("isolate 覆寫含註解的 config.jsonc 時提出警告", async () => {
+    const { root, ctx } = await setup();
+    await fs.writeFile(
+      path.join(ctx.brandsDir, "client/config.jsonc"),
+      '// 客戶 A 專用\n{ "title": "Client", "extends": "base" }',
+    );
+
+    const out = await runCli([
+      "isolate",
+      "client",
+      "--dir",
+      ctx.brandsDir,
+      "--env-file",
+      ctx.envFile,
+    ]);
+
+    expect(out).toContain("註解");
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("原本沒有註解時不發出警告", async () => {
+    const { root, ctx } = await setup();
+
+    const out = await runCli([
+      "isolate",
+      "client",
+      "--dir",
+      ctx.brandsDir,
+      "--env-file",
+      ctx.envFile,
+    ]);
+
+    expect(out).not.toContain("註解");
 
     await fs.rm(root, { recursive: true, force: true });
   });

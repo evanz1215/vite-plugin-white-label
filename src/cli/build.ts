@@ -5,17 +5,24 @@
  */
 import path from "path";
 import { existsSync } from "fs";
+import { assertBrandName, assertInside } from "../options";
 
 export const buildBrands = async (opts: {
   brandsDir: string;
   brands: string[];
   outDir: string;
+  envKey: string;
   configFile?: string;
 }) => {
   // 動態載入:switch/create/isolate 不需要 vite
   const { build } = await import("vite");
 
+  // 先圍籬再開工:outDir 與品牌名都會流進 emptyOutDir 的清除範圍
+  const cwd = process.cwd();
+  const outRoot = assertInside(cwd, path.resolve(cwd, opts.outDir));
+
   for (const brand of opts.brands) {
+    assertBrandName(brand);
     if (!existsSync(path.join(opts.brandsDir, brand))) {
       throw new Error(`品牌不存在:${brand}`);
     }
@@ -26,14 +33,14 @@ export const buildBrands = async (opts: {
       `\n[vite-plugin-white-label] ======== build: ${brand} ========\n`,
     );
     // defineBrandConfig 的 loadEnv 會讀 process.env,優先於 .env 檔
-    process.env.VITE_BRAND = brand;
+    process.env[opts.envKey] = brand;
 
     await build({
       configFile: opts.configFile
         ? path.resolve(process.cwd(), opts.configFile)
         : undefined,
       build: {
-        outDir: path.resolve(process.cwd(), opts.outDir, brand),
+        outDir: path.join(outRoot, brand),
         emptyOutDir: true,
       },
     });
