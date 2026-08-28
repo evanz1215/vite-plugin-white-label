@@ -10,7 +10,7 @@ Vite 白牌(white-label / multi-brand)系統,框架無關(Vue / React 皆可)。
 - 📦 **多品牌批次打包** — 一個指令把每個品牌各自輸出成可獨立部署的完整站點
 - 🔧 **CLI 管理工具** — 互動式切換、建立、獨立化品牌
 
-> 需求:Node >= 20.12、Vite >= 5。除 `json5` 外零依賴。
+> 需求:Node >= 20.12、Vite >= 6。除 `json5` 外零依賴。
 
 ## 安裝
 
@@ -289,6 +289,14 @@ dev 模式下由 Vite server.watcher 維護連結並觸發 HMR:模組圖裡掛�
 - `brands/` 與 `runtimeDir` 必須位於**同一磁碟分割區**(hard link 限制);跨分割區時自動 fallback 為 copy,但該模式下內容修改不會自動同步。
 - 品牌繼承只有一層:`extends` 指向的品牌自己的 `extends` 不會被遞迴解析。
 - `runtimeDir`(預設 `.runtime/`)是產物目錄,請加進 `.gitignore`。
+
+## 升級到 0.1.0
+
+此版本修掉數個路徑穿越與資料遺失缺陷(詳見 [CHANGELOG.md](./CHANGELOG.md))。其中三項是破壞性變更:
+
+- **`vite` peer dependency 從 `>=5` 收窄到 `>=6`** — 並非證實 vite 5 不相容,而是測試套件無法驗證 vite 5(vitest 4 需要 vite 的 `./module-runner` export),因此把宣告範圍收窄到實際測過的版本。
+- **品牌名必須符合 `^[a-z0-9][a-z0-9-]*$`** — 用大寫字母或底線命名的品牌目錄,現在會被 CLI 與 `defineBrandConfig` 拒絕。
+- **`vite-brand build --out-dir` 不能再解析到專案根目錄之外** — 它帶有 `emptyOutDir: true`,指到專案外的輸出路徑本來就有風險,現在會直接拒絕而非靜默允許。
 
 ## 範例
 

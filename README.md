@@ -10,7 +10,7 @@ A framework-agnostic (Vue / React) white-label / multi-brand system for Vite, bu
 - 📦 **Batch multi-brand build** — one command outputs every brand as its own fully deployable site
 - 🔧 **CLI management tool** — interactive switching, creation, and isolation of brands
 
-> Requirements: Node >= 20.12, Vite >= 5. Zero dependencies except `json5`.
+> Requirements: Node >= 20.12, Vite >= 6. Zero dependencies except `json5`.
 
 ## Install
 
@@ -289,6 +289,14 @@ In dev mode, Vite's `server.watcher` maintains the links and drives HMR: the mod
 - `brands/` and `runtimeDir` must be on the **same filesystem partition** (a hard-link constraint); across partitions it automatically falls back to copying, but in that mode content changes are not automatically synced.
 - Brand inheritance is only one level deep: an `extends` brand's own `extends` is not resolved recursively.
 - `runtimeDir` (default `.runtime/`) is a build artifact directory — add it to `.gitignore`.
+
+## Upgrading to 0.1.0
+
+This release closes several path-escape and data-loss defects (see [CHANGELOG.md](./CHANGELOG.md)). Three of those fixes are breaking:
+
+- **`vite` peer dependency raised from `>=5` to `>=6`** — not a confirmed incompatibility, but the test suite could not verify Vite 5 (vitest 4 requires Vite's `./module-runner` export) so the declared range was narrowed to match what's actually tested.
+- **Brand names must match `^[a-z0-9][a-z0-9-]*$`** — a brand directory using uppercase letters or underscores will now be rejected by the CLI and `defineBrandConfig`.
+- **`vite-brand build --out-dir` can no longer resolve outside the project root** — it carries `emptyOutDir: true`, so an out-of-tree output path was always risky; it's now rejected instead of silently allowed.
 
 ## Examples
 
