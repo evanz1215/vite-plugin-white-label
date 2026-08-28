@@ -3,15 +3,21 @@ import fs from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import type { ResolvedBrandOptions } from "../types";
-import { normalizePath } from "../options";
+import { normalizePath, readBrandConfig } from "../options";
+
+const TW_CONFIG = "tailwind.config.ts";
+const EMPTY_PRESET = `export default {};
+`;
 
 /**
- * Tailwind 品牌 preset 同步。
- * 移植自 .xgi/core/vite/plugins/xgi-plugin-tailwindcss。
+ * Tailwind 品牌 preset 同步(Tailwind v3 用;v4 的 CSS-first 設定直接走 shadow)。
  *
- * 使用端的根 tailwind.config.ts 引用 ctx.tailwind.presetPath;
- * 本 plugin 在 shadow 建好後(shadowReady resolve)把 <runtimeDir>/tailwind.config.ts
- * 複製過去,dev 模式下由 Vite server.watcher 監聽品牌設定變更後重寫。
+ * 使用端的根 tailwind.config.ts 引用 ctx.tailwind.presetPath。
+ *
+ * 來源刻意直接讀 brands/ 而非 shadow 出來的 runtimeDir:runtimeDir 由 shadow
+ * 的事件佇列非同步重建,從那裡讀就得跟它競速 —— 品牌設定剛被刪除時很容易複製到
+ * 還沒斷鏈的舊內容。自己解析一層繼承只是多讀一個 config.jsonc,卻讓這個 plugin
+ * 完全不依賴 shadow 的時序。
  */
 export const tailwindPlugin = (
   ctx: ResolvedBrandOptions,
@@ -19,18 +25,29 @@ export const tailwindPlugin = (
 ): Plugin => {
   const tw = ctx.tailwind;
 
+  /** 依「當前品牌 → extends」的優先序找出品牌設定檔,都沒有則回傳 null */
+  const resolveSource = (): string | null => {
+    const config = readBrandConfig(ctx.brandsDir, ctx.brand);
+    for (const brand of [ctx.brand, config.extends]) {
+      if (!brand) continue;
+      const p = path.join(ctx.brandsDir, brand, TW_CONFIG);
+      if (existsSync(p)) return p;
+    }
+    return null;
+  };
+
   const sync = async () => {
     if (!tw) return;
-    const src = path.join(ctx.runtimeDir, "tailwind.config.ts");
     await fs.mkdir(path.dirname(tw.presetPath), { recursive: true });
-    if (existsSync(src)) {
+
+    const src = resolveSource();
+    if (src) {
       await fs.copyFile(src, tw.presetPath);
-    } else {
-      // 品牌沒有(或剛移除)tailwind.config.ts → 一律寫回空 preset。
-      // 這裡若加上 !existsSync(presetPath) 條件,刪掉品牌設定後舊 preset
-      // 會留在原地繼續生效。
-      await fs.writeFile(tw.presetPath, "export default {};\n");
+      return;
     }
+    // 沒有任何品牌設定(或剛被移除)→ 一律寫回空 preset:讓根設定的 import 不會
+    // 失敗,也不會留著前一個品牌的殘留。
+    await fs.writeFile(tw.presetPath, EMPTY_PRESET);
   };
 
   return {
@@ -39,23 +56,34 @@ export const tailwindPlugin = (
 
     async configResolved() {
       if (!tw) return;
+      // 來源已不是 runtimeDir,這裡等待只是避免 shadow 失敗時仍寫出 preset
       await shadowReady;
       await sync();
     },
 
     configureServer(server) {
       if (!tw) return;
-      // watch 品牌來源檔而非 runtime 連結,add/change 都重新同步
-      const brandTwConfig = path.join(
-        ctx.brandsDir,
-        ctx.brand,
-        "tailwind.config.ts",
-      );
-      server.watcher.add(brandTwConfig);
+      // 監看整個 brandsDir:繼承來源可能是任一品牌,且 extends 本身也會被改
+      server.watcher.add(ctx.brandsDir);
+
+      const base = normalizePath(ctx.brandsDir) + "/";
       server.watcher.on("all", (_evt, file) => {
-        if (normalizePath(file) === normalizePath(brandTwConfig)) {
-          void sync();
+        const p = normalizePath(file);
+        if (!p.startsWith(base)) return;
+
+        // 設定檔本身,或 config.jsonc(extends 換了就等於換了來源)
+        const name = p.slice(p.lastIndexOf("/") + 1);
+        if (
+          name !== TW_CONFIG &&
+          name !== "config.jsonc" &&
+          name !== "config.json"
+        ) {
+          return;
         }
+
+        void sync().catch((err) =>
+          console.error("[vite-plugin-white-label]", err),
+        );
       });
     },
   };

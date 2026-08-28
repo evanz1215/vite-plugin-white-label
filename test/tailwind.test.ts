@@ -25,12 +25,9 @@ const setup = async (tailwind: boolean | { presetPath?: string } = true) => {
 };
 
 describe("tailwindPlugin", () => {
-  it("等 shadowReady 後才同步:runtime 有設定檔就複製", async () => {
+  it("等 shadowReady 後才同步:品牌有設定檔就複製", async () => {
     const { ctx, write, presetPath, cleanup } = await setup();
-    await write(
-      ".runtime/brand/tailwind.config.ts",
-      "export default { a: 1 };",
-    );
+    await write("brands/client/tailwind.config.ts", "export default { a: 1 };");
 
     let ready!: () => void;
     const shadowReady = new Promise<void>((r) => (ready = r));
@@ -51,7 +48,7 @@ describe("tailwindPlugin", () => {
     await cleanup();
   });
 
-  it("runtime 沒有設定檔:一律寫回空 preset(不保留前一個品牌的殘留)", async () => {
+  it("品牌沒有設定檔:一律寫回空 preset(不保留前一個品牌的殘留)", async () => {
     const { ctx, presetPath, cleanup } = await setup();
     const plugin = tailwindPlugin(ctx, Promise.resolve());
 
@@ -82,10 +79,7 @@ describe("tailwindPlugin", () => {
 
   it("dev:server.watcher 收到品牌 tailwind.config.ts 變更時重新同步", async () => {
     const { ctx, write, presetPath, cleanup } = await setup();
-    await write(
-      ".runtime/brand/tailwind.config.ts",
-      "export default { v: 1 };",
-    );
+    await write("brands/client/tailwind.config.ts", "export default { v: 1 };");
 
     const plugin = tailwindPlugin(ctx, Promise.resolve());
     await (plugin.configResolved as Function)();
@@ -98,23 +92,17 @@ describe("tailwindPlugin", () => {
       "client",
       "tailwind.config.ts",
     );
-    expect(watcher.add).toHaveBeenCalledWith(brandTwConfig);
+    expect(watcher.add).toHaveBeenCalledWith(ctx.brandsDir);
 
-    // 模擬品牌設定變更(hard link 下 runtime 檔內容已同步),事件觸發重新複製
-    await write(
-      ".runtime/brand/tailwind.config.ts",
-      "export default { v: 2 };",
-    );
+    // 品牌設定內容變更 → 事件觸發重新複製
+    await write("brands/client/tailwind.config.ts", "export default { v: 2 };");
     watcher.emit("all", "change", brandTwConfig);
     await vi.waitFor(() =>
       expect(readFileSync(presetPath, "utf8")).toContain("v: 2"),
     );
 
     // 無關檔案的事件不觸發
-    await write(
-      ".runtime/brand/tailwind.config.ts",
-      "export default { v: 3 };",
-    );
+    await write("brands/client/tailwind.config.ts", "export default { v: 3 };");
     watcher.emit(
       "all",
       "change",
@@ -131,7 +119,7 @@ describe("preset 殘留", () => {
   it("品牌設定被刪除後 preset 要退回空設定,而非留著舊內容", async () => {
     const { ctx, write, presetPath, cleanup } = await setup();
     await write(
-      ".runtime/brand/tailwind.config.ts",
+      "brands/client/tailwind.config.ts",
       "export default { theme: 1 };",
     );
 
@@ -141,11 +129,104 @@ describe("preset 殘留", () => {
     await (plugin.configResolved as Function)();
     expect(readFileSync(presetPath, "utf8")).toContain("theme");
 
-    // 品牌移除 tailwind.config.ts → shadow 內的連結也跟著消失
-    await fs.rm(path.join(ctx.runtimeDir, "tailwind.config.ts"));
+    await fs.rm(path.join(ctx.brandsDir, "client", "tailwind.config.ts"));
     await (plugin.configResolved as Function)();
 
     expect(readFileSync(presetPath, "utf8")).toBe("export default {};\n");
+
+    await cleanup();
+  });
+});
+
+describe("extends 的 tailwind 設定", () => {
+  it("當前品牌沒有設定時,採用 extends 品牌的", async () => {
+    const { ctx, write, presetPath, cleanup } = await setup();
+    await write("brands/client/config.jsonc", `{ "extends": "base" }`);
+    await write(
+      "brands/base/tailwind.config.ts",
+      "export default { from: 'base' };",
+    );
+
+    const plugin = tailwindPlugin(ctx, Promise.resolve());
+    await (plugin.configResolved as Function)();
+
+    expect(readFileSync(presetPath, "utf8")).toContain("base");
+
+    await cleanup();
+  });
+
+  it("當前品牌的設定優先於 extends", async () => {
+    const { ctx, write, presetPath, cleanup } = await setup();
+    await write("brands/client/config.jsonc", `{ "extends": "base" }`);
+    await write(
+      "brands/base/tailwind.config.ts",
+      "export default { from: 'base' };",
+    );
+    await write(
+      "brands/client/tailwind.config.ts",
+      "export default { from: 'client' };",
+    );
+
+    const plugin = tailwindPlugin(ctx, Promise.resolve());
+    await (plugin.configResolved as Function)();
+
+    expect(readFileSync(presetPath, "utf8")).toContain("client");
+
+    await cleanup();
+  });
+
+  it("extends 品牌的設定變更也會觸發同步", async () => {
+    const { ctx, write, presetPath, cleanup } = await setup();
+    await write("brands/client/config.jsonc", `{ "extends": "base" }`);
+    await write("brands/base/tailwind.config.ts", "export default { v: 1 };");
+
+    const plugin = tailwindPlugin(ctx, Promise.resolve());
+    await (plugin.configResolved as Function)();
+    expect(readFileSync(presetPath, "utf8")).toContain("v: 1");
+
+    const watcher = Object.assign(new EventEmitter(), { add: vi.fn() });
+    (plugin.configureServer as Function)({ watcher });
+
+    await write("brands/base/tailwind.config.ts", "export default { v: 2 };");
+    watcher.emit(
+      "all",
+      "change",
+      path.join(ctx.brandsDir, "base", "tailwind.config.ts"),
+    );
+
+    await vi.waitFor(() =>
+      expect(readFileSync(presetPath, "utf8")).toContain("v: 2"),
+    );
+
+    await cleanup();
+  });
+
+  it("config.jsonc 改掉 extends 之後 preset 跟著換來源", async () => {
+    const { ctx, write, presetPath, cleanup } = await setup();
+    await write("brands/client/config.jsonc", `{ "extends": "base" }`);
+    await write("brands/base/tailwind.config.ts", "export default { v: 1 };");
+    await write(
+      "brands/base-v2/tailwind.config.ts",
+      "export default { v: 2 };",
+    );
+
+    const plugin = tailwindPlugin(ctx, Promise.resolve());
+    await (plugin.configResolved as Function)();
+    expect(readFileSync(presetPath, "utf8")).toContain("v: 1");
+
+    const watcher = Object.assign(new EventEmitter(), { add: vi.fn() });
+    (plugin.configureServer as Function)({ watcher });
+
+    await write("brands/client/config.jsonc", `{ "extends": "base-v2" }`);
+    watcher.emit(
+      "all",
+      "change",
+      path.join(ctx.brandsDir, "client", "config.jsonc"),
+    );
+
+    await vi.waitFor(() =>
+      expect(readFileSync(presetPath, "utf8")).toContain("v: 2"),
+    );
 
     await cleanup();
   });
