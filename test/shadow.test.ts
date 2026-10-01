@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
@@ -83,6 +83,28 @@ describe("runtimeDir 所有權防護", () => {
     await expect(createShadow(ctx, {})).resolves.not.toThrow();
 
     // marker 在重建後仍在
+    expect(existsSync(path.join(ctx.runtimeDir, MARKER))).toBe(true);
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  it("清空刪到一半失敗(重啟重疊、Windows ENOTEMPTY)後,下一次重建必須能恢復", async () => {
+    const { root, ctx } = await setup();
+    await createShadow(ctx, {});
+
+    // 模擬刪整個 runtimeDir 時只刪掉了 marker 就 ENOTEMPTY 的情況
+    const realRm = fs.rm;
+    const spy = vi.spyOn(fs, "rm").mockImplementation(async (p, opts) => {
+      if (path.resolve(String(p)) === path.resolve(ctx.runtimeDir)) {
+        await realRm(path.join(ctx.runtimeDir, MARKER), { force: true });
+        throw Object.assign(new Error("ENOTEMPTY"), { code: "ENOTEMPTY" });
+      }
+      return realRm(p, opts);
+    });
+    await createShadow(ctx, {}).catch(() => {});
+    spy.mockRestore();
+
+    await expect(createShadow(ctx, {})).resolves.not.toThrow();
     expect(existsSync(path.join(ctx.runtimeDir, MARKER))).toBe(true);
 
     await fs.rm(root, { recursive: true, force: true });
