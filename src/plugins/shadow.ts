@@ -38,7 +38,19 @@ const clearRuntimeDir = async (runtimeDir: string) => {
           `\n若確定要用這個目錄,請先自行清空。`,
       );
     }
-    await fs.rm(runtimeDir, { recursive: true, force: true });
+    // marker 永遠不刪,只清其餘項目:清到一半失敗(dev 重啟重疊、Windows 暫時
+    // ENOTEMPTY/EPERM)時所有權仍在,下次重建可自行恢復,不會被上方檢查永久擋住。
+    await Promise.all(
+      entries
+        .filter((name) => name !== MARKER)
+        .map((name) =>
+          fs.rm(path.join(runtimeDir, name), {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+          }),
+        ),
+    );
   }
   await fs.mkdir(runtimeDir, { recursive: true });
   await fs.writeFile(path.join(runtimeDir, MARKER), "");

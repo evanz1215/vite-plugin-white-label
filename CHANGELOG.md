@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+**Fixed**
+
+- Clearing `runtimeDir` deleted the ownership marker first; if the clear was interrupted (overlapping dev-server restarts, transient `ENOTEMPTY`/`EPERM` on Windows), the leftover files without a marker made every later start fail with "refusing to delete". The marker is now kept while the rest is cleared, with retries on transient errors
+
 ## 0.1.0
 
 **Breaking**
